@@ -1,0 +1,1332 @@
+# Biblioteca de Estudos (Estuda Jaider) - Versão 9.1 Corrigida
+import base64, html, json, os, re, shutil, stat, subprocess, sys, threading, time, traceback, uuid, webbrowser, zipfile, queue, logging
+import urllib.parse, urllib.request
+from datetime import datetime
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+# Tente importar bcrypt, se não estiver disponível use hashlib
+try:
+    import bcrypt
+    USAR_BCRYPT = True
+except ImportError:
+    USAR_BCRYPT = False
+    import hashlib
+
+# Configuração de logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
+
+VERSAO = "9.1"
+PORTA = 47861
+ESPERA = 180
+TIPOS = {".pdf": "PDF", ".pptx": "Slides", ".docx": "Word", ".xlsx": "Planilha", ".apkg": "Anki"}
+MIME = {".html": "text/html; charset=utf-8", ".css": "text/css", ".js": "text/javascript", ".json": "application/json", ".svg": "image/svg+xml",
+        ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".pdf": "application/pdf",
+        ".woff2": "font/woff2", ".woff": "font/woff", ".ttf": "font/ttf", ".mp4": "video/mp4", ".mp3": "audio/mpeg", ".txt": "text/plain; charset=utf-8"}
+RE_TITULO = re.compile(rb"<title>(.*?)</title>", re.I | re.S)
+RE_OLHO = re.compile(r'class="olho">\s*([^<·]+?)\s*·')
+RE_PROIBIDO = re.compile(r'[<>:"|?*\x00-\x1f]')
+INJETADO = """<style>.bib-volta{position:fixed;left:24px;bottom:24px;z-index:2147483647;font:600 15px/1 Inter,Arial,sans-serif;color:#fff;background:#2B4F7E;border:2px solid #fff;border-radius:12px;padding:12px 18px;text-decoration:none;box-shadow:0 6px 16px rgba(0,0,0,.25);transition:transform 0.15s}.bib-volta:hover{transform:scale(1.05)}@media print{.bib-volta{display:none}}</style><a class="bib-volta" href="/" onclick="if(window.opener){window.close();return false;}">&#8592; Fechar Site e Voltar</a><script>setInterval(function(){fetch('/__vivo').catch(function(){})},15000)</script>""".encode("utf-8")
+
+PAGINA = r'''<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Biblioteca de Estudos</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&family=Source+Serif+4:ital,wght@0,400;1,400&display=swap">
+<style>
+:root{--bg:#FDFDFC;--tinta:#1D1D1F;--suave:#5B5F66;--fio:#D9DCE1;--veia:#2B4F7E;--site:#EEF3F9;--pdf:#F4F5F7;--slides:#F3EFFA;--anki:#EDF6F0;--word:#F6F2EA;--pasta:#E8F0FE;
+--org:Inter,Arial,sans-serif;--ler:'Source Serif 4',Georgia,serif;color-scheme:light}
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+body{margin:0;background:var(--bg);color:var(--tinta);font:400 17px/1.55 var(--ler);padding:28px max(16px,4vw) 64px}
+.pagina{max-width:1040px;margin:0 auto;display:flex;flex-direction:column;gap:32px}
+header{display:flex;align-items:center;justify-content:space-between;gap:16px}
+.olho{font:400 13px/1.3 var(--org);color:var(--suave);margin:0}
+h1{font:400 40px/1.1 var(--org);letter-spacing:-.015em;margin:0}
+.abre{display:flex;flex-direction:column;gap:14px}
+.busca{display:flex;flex-direction:column;gap:6px;max-width:440px}
+.busca label{font:600 13px/1.3 var(--org);color:var(--suave)}
+input{font:400 16px/1.3 var(--org);color:var(--tinta);background:#fff;border:1px solid var(--fio);border-radius:11px;padding:11px 14px;width:100%}
+input:focus-visible,a:focus-visible{outline:2px solid var(--veia);outline-offset:2px}
+#lista{display:flex;flex-direction:column;gap:24px;width:100%;min-width:0}
+.disc{display:flex;flex-direction:column;gap:12px}
+h2{font:600 18px/1.3 var(--org);color:var(--veia);margin:0;display:flex;align-items:baseline;gap:8px;border-bottom:1px solid var(--fio);padding-bottom:7px}
+h2 small{font:400 13px var(--org);color:var(--suave);font-variant-numeric:tabular-nums}
+.grade{display:grid;grid-template-columns:repeat(auto-fill,minmax(250px,1fr));gap:12px}
+
+/* Animações de Entrada em Cascata */
+@keyframes entraCard { from { opacity: 0; transform: translateY(15px); } to { opacity: 1; transform: translateY(0); } }
+.item{background:var(--fx,var(--site));border-radius:11px;padding:14px 16px;color:inherit;text-decoration:none;display:flex;flex-direction:column;gap:4px;min-width:0; transition:filter .15s, transform .15s, outline .15s; animation: entraCard 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards; opacity: 0;}
+.item:hover{filter:brightness(.95)}
+.item b{font:600 15.5px/1.35 var(--org);overflow-wrap:anywhere;display:flex;align-items:center;gap:6px;flex:1}
+.item span{font:400 12.5px/1.3 var(--org);color:var(--suave);font-variant-numeric:tabular-nums}
+.t-Site{--fx:var(--site)}.t-PDF,.t-Planilha{--fx:var(--pdf)}.t-Slides{--fx:var(--slides)}.t-Anki{--fx:var(--anki)}.t-Word{--fx:var(--word)}.t-Pasta{--fx:var(--pasta); color:var(--veia)}
+
+/* Drag & Drop Styles */
+.item.arrastando { opacity: 0.4 !important; }
+.item.alvo-drag { outline: 2px dashed var(--veia); background: var(--site); transform: scale(1.02); z-index: 10; }
+
+/* Menu Flutuante */
+.btn-opcoes{background:transparent; color:inherit; border:none; padding:2px 8px; border-radius:6px; cursor:pointer; opacity:0.6; font:600 18px/1 var(--org); margin:-4px -8px -4px 4px}
+.btn-opcoes:hover{opacity:1; background:rgba(0,0,0,0.06)}
+.menu-flutuante { position: fixed; background: var(--bg); border: 1px solid var(--fio); border-radius: 11px; box-shadow: 0 8px 32px rgba(29,29,31,.15); padding: 6px; display: none; flex-direction: column; gap: 2px; z-index: 2147483647; min-width: 180px; }
+.menu-flutuante button { background: transparent; color: var(--tinta); border-radius: 8px; padding: 10px 14px; text-align: left; font: 600 14px/1 var(--org); border: none; cursor: pointer; transition: background 0.15s; }
+.menu-flutuante button:hover { background: var(--site); }
+.menu-flutuante button.perigo { color: #A8322D; }
+.menu-flutuante button.perigo:hover { background: #FCE8E8; }
+
+/* Loading States */
+.carregando {
+  text-align: center;
+  padding: 40px;
+  color: var(--suave);
+  font: 400 16px/1.5 var(--org);
+}
+
+.sucesso { border-left: 4px solid #2E7D52; padding-left: 12px; }
+.erro { border-left: 4px solid #A8322D; padding-left: 12px; }
+
+.migalhas{font:600 16px/1.3 var(--org);color:var(--suave);display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:8px;border-bottom:1px solid var(--fio);padding-bottom:12px}
+.migalhas a{color:var(--veia);text-decoration:none;display:flex;align-items:center;gap:4px}
+.migalhas a:hover{text-decoration:underline}
+.migalhas .sep{color:var(--fio)}
+.migalhas span:not(.sep){color:var(--tinta)}
+.migalhas a svg{margin-bottom:2px}
+.vazio{background:var(--site);border-radius:11px;padding:18px 20px; animation: entraCard 0.4s ease forwards; opacity:0}
+.vazio h2{border:0;padding:0;margin:0 0 6px}.vazio ol{margin:0;padding-left:22px}.vazio p{margin:0}
+details{font:400 14px/1.5 var(--org);color:var(--suave)}
+summary{cursor:pointer;font-weight:600}
+details ol{margin:8px 0 0;padding-left:20px}
+code{font:400 13.5px ui-monospace,Consolas,monospace;background:var(--pdf);border-radius:5px;padding:1px 5px;overflow-wrap:anywhere}
+dialog{border:0;border-radius:11px;padding:22px 24px;width:min(460px,calc(100vw - 32px));color:var(--tinta);background:var(--bg);box-shadow:0 8px 32px rgba(29,29,31,.22)}
+dialog::backdrop{background:rgba(29,29,31,.35)}
+dialog h2{border:0;padding:0;margin:0 0 4px;font-size:20px;font-weight:400;color:var(--tinta)}
+.dnome{margin:0 0 16px;font:400 14px/1.4 var(--org);color:var(--suave);overflow-wrap:anywhere}
+dialog .acoes{margin-top:18px}
+.acoes{display:flex;flex-wrap:wrap;gap:10px}
+.aviso{margin:0;font:400 14px/1.4 var(--org);color:#2F6B4C}.aviso.erro{color:#A8322D}
+button.prim{background:var(--veia);color:#fff}
+button{font:600 14px/1 var(--org);color:var(--veia);background:var(--site);border:0;border-radius:11px;padding:11px 14px;cursor:pointer}button:hover{filter:brightness(.97)}button:focus-visible{outline:2px solid var(--veia);outline-offset:2px}
+@media(prefers-reduced-motion:reduce){.item, .vazio {animation:none; opacity:1}}
+@media(max-width:520px){h1{font-size:32px}}
+
+/* Modo Escuro */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1D1D1F;
+    --tinta: #F5F5F7;
+    --suave: #8E8E93;
+    --fio: #424245;
+    --veia: #0A84FF;
+    --site: #2D2D2F;
+    --pdf: #252526;
+    --slides: #2D2D2F;
+    --anki: #1D2A24;
+    --word: #2D2A26;
+    --pasta: #1D2A3A;
+  }
+}
+</style>
+</head>
+<body>
+
+<div class="pagina" id="telaLogin" style="align-items:center; justify-content:center; min-height:80vh; gap:40px">
+    <header style="flex-direction:column; gap:12px; margin-bottom: 16px">
+        <img class="logo" src="/__logo.png?v=8" alt="estuda Jaider" style="height:44px; width:auto; margin-bottom: -4px;">
+        <p class="olho">Estudos</p>
+    </header>
+    
+    <div id="bLogin" style="width:100%; max-width:340px; display:flex; flex-direction:column; gap:24px">
+        <h1 style="text-align:center">Acessar</h1>
+        <form id="fLogin" style="display:flex; flex-direction:column; gap:16px">
+            <div class="busca"><label for="lNome">Nome</label><input id="lNome" type="text" required autocomplete="username"></div>
+            <div class="busca"><label for="lSenha">Senha</label><input id="lSenha" type="password" required autocomplete="current-password"></div>
+            <p id="avL" class="aviso erro" hidden></p>
+            <button class="prim" type="submit" style="margin-top:8px">Acessar</button>
+            <button type="button" id="btnIrCriar" style="background:transparent; color:var(--suave)">+ Criar Conta</button>
+        </form>
+    </div>
+
+    <div id="bCriar" style="width:100%; max-width:340px; display:flex; flex-direction:column; gap:24px" hidden>
+        <h1 style="text-align:center">Criar Conta</h1>
+        <form id="fCriar" style="display:flex; flex-direction:column; gap:16px">
+            <div class="busca"><label for="cNome">Nome</label><input id="cNome" type="text" required autocomplete="username"></div>
+            <div class="busca"><label for="cSenha">Senha</label><input id="cSenha" type="password" required autocomplete="new-password"></div>
+            <div class="busca"><label for="cConf">Confirmar senha</label><input id="cConf" type="password" required autocomplete="new-password"></div>
+            <p id="avC" class="aviso erro" hidden></p>
+            <button class="prim" type="submit" style="margin-top:8px">+ Criar Conta</button>
+            <button type="button" id="btnIrLogin" style="background:transparent; color:var(--suave)">Já tenho conta (Acessar)</button>
+        </form>
+    </div>
+</div>
+
+<div class="pagina" id="telaApp" hidden>
+    <header>
+        <p class="olho">Estudos · Medicina</p>
+        <img class="logo" src="/__logo.png?v=8" alt="estuda Jaider" style="height:26px; width:auto;">
+    </header>
+    <div class="abre">
+    <h1>Biblioteca de Estudos</h1>
+    <div class="acoes">
+        <button id="add" class="prim" type="button">Adicionar estudo</button>
+        <button id="btnNovaPasta" type="button">Nova Pasta</button>
+        <button id="pasta" type="button">Abrir pasta da biblioteca</button>
+        <button id="btnSair" type="button" style="background:transparent; color:var(--suave)">Sair</button>
+    </div>
+    <p id="aviso" class="aviso" role="status" hidden></p>
+    <div class="busca" id="caixaBusca" hidden><label for="busca">Buscar</label><input id="busca" type="search" placeholder="Busque em todas as pastas..." autocomplete="off"></div>
+    </div>
+    
+    <main id="lista">
+        <div class="carregando">Carregando biblioteca...</div>
+    </main>
+    
+    <dialog id="dlg"><form method="dialog" id="fDlg"><h2>Adicionar estudo</h2><p id="dNome" class="dnome"></p>
+    <div class="busca"><label for="disc"> salvar na pasta</label><input id="disc" list="discs" autocomplete="off" placeholder="Em branco: salvo na raiz"><datalist id="discs"></datalist></div>
+    <div class="acoes"><button class="prim" id="dOk" type="submit" value="ok">Adicionar</button><button type="button" id="dCan">Cancel</button></div></form></dialog>
+
+    <dialog id="dlgPasta"><form method="dialog" id="fDlgPasta"><h2>Criar Nova Pasta</h2>
+    <div class="busca"><label for="nPasta">Nome da Pasta (use / para criar subpastas)</label><input id="nPasta" type="text" required placeholder="Ex: Semestre 1/Anatomia" autocomplete="off" list="discsPasta"><datalist id="discsPasta"></datalist></div>
+    <div class="acoes"><button class="prim" type="submit">Criar</button><button type="button" id="dCanPasta">Cancel</button></div></form></dialog>
+
+    <!-- Modal Mover / Renomear -->
+    <dialog id="dlgMover"><form method="dialog" id="fDlgMover"><h2>Mover ou Renomear</h2>
+    <input type="hidden" id="mOrigem">
+    <input type="hidden" id="mExtensao">
+    <div class="busca" style="margin-bottom:12px">
+        <label for="mPasta">Pasta de destino (use / para subpastas)</label>
+        <input id="mPasta" type="text" autocomplete="off" list="discsMover" placeholder="Deixe em branco para salvar na raiz">
+        <datalist id="discsMover"></datalist>
+    </div>
+    <div class="busca">
+        <label for="mNome">Nome do item</label>
+        <input id="mNome" type="text" required autocomplete="off">
+    </div>
+    <div class="acoes"><button class="prim" type="submit">Salvar Alterações</button><button type="button" id="dCanMover">Cancel</button></div></form></dialog>
+
+    <!-- Menu Dropdown Flutuante -->
+    <div id="menuFlutuante" class="menu-flutuante">
+        <button type="button" id="bMenuAbrir">Open</button>
+        <button type="button" id="bMenuMover">Mover / Renomear</button>
+        <button type="button" id="bMenuExcluir" class="perigo">Excluir</button>
+    </div>
+</div>
+
+<script>
+let B={disciplinas:[]};
+let pastaAtual = sessionStorage.getItem('pastaAtual') || "";
+let itemMenu = null;
+let animDelay = 0;
+let buscaTimeout = null;
+
+const esc=t=>String(t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const url=c=>'/'+c.split('/').map(encodeURIComponent).join('/');
+const norm=t=>String(t).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+const $=i=>document.getElementById(i);
+function post(u,d){return fetch(u,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(d||{})})}
+
+const tLogin=$('telaLogin'), tApp=$('telaApp'), bLogin=$('bLogin'), bCriar=$('bCriar');
+const avL=$('avL'), avC=$('avC'), mostraAviso=(el,msg)=>{el.textContent=msg;el.hidden=!msg;el.classList.toggle('erro',true)};
+
+$('btnIrCriar').onclick = () => { bLogin.hidden = true; bCriar.hidden = false; avC.hidden=true; $('cNome').focus(); };
+$('btnIrLogin').onclick = () => { bCriar.hidden = true; bLogin.hidden = false; avL.hidden=true; $('lNome').focus(); };
+
+$('fLogin').onsubmit = async (e) => {
+    e.preventDefault(); avL.hidden=true;
+    try {
+        const r = await post('/__login', { nome: $('lNome').value, senha: $('lSenha').value });
+        if (r.ok) { 
+            sessionStorage.setItem('usrLogado', '1'); 
+            tLogin.hidden = true; tApp.hidden = false; carregar(); 
+        } else { mostraAviso(avL, await r.text()); }
+    } catch(err) {
+        mostraAviso(avL, 'Erro de conexão: ' + err.message);
+    }
+};
+
+$('fCriar').onsubmit = async (e) => {
+    e.preventDefault(); avC.hidden=true;
+    const nome = $('cNome').value, senha = $('cSenha').value, conf = $('cConf').value;
+    if (senha !== conf) return mostraAviso(avC, 'As senhas não coincidem.');
+    if (senha.length < 6) return mostraAviso(avC, 'Senha deve ter pelo menos 6 caracteres.');
+    
+    try {
+        const r = await post('/__registrar', { nome, senha });
+        if (r.ok) { 
+            avL.textContent = 'Conta criada! Faça login.'; avL.classList.remove('erro'); avL.hidden=false; 
+            $('btnIrLogin').click(); 
+        } else { mostraAviso(avC, await r.text()); }
+    } catch(err) {
+        mostraAviso(avC, 'Erro de conexão: ' + err.message);
+    }
+};
+
+$('btnSair').onclick = async () => {
+    try {
+        await post('/__logout'); 
+        sessionStorage.removeItem('usrLogado');
+        sessionStorage.removeItem('pastaAtual');
+        pastaAtual = "";
+        tApp.hidden = true; tLogin.hidden = false; $('lSenha').value = '';
+    } catch(err) {
+        console.error('Erro ao sair:', err);
+    }
+};
+
+const lista=$('lista'), busca=$('busca'), menuFlutuante=$('menuFlutuante');
+
+window.abrirPasta = (caminho) => {
+    pastaAtual = caminho;
+    sessionStorage.setItem('pastaAtual', caminho);
+    busca.value = ""; 
+    desenhar();
+};
+
+window.prepararMover = (caminho, tipo) => {
+    const partes = caminho.split('/');
+    let nome = partes.pop();
+    const pasta = partes.join('/');
+    
+    let ext = "";
+    if (tipo !== 'pasta' && tipo !== 'Site') {
+        const dotIndex = nome.lastIndexOf('.');
+        if (dotIndex > 0) {
+            ext = nome.substring(dotIndex);
+            nome = nome.substring(0, dotIndex);
+        }
+    }
+    
+    $('mOrigem').value = caminho;
+    $('mExtensao').value = ext;
+    $('mNome').value = nome;
+    $('mPasta').value = pasta ? pasta + '/' : '';
+    
+    const dirs = (B.disciplinas||[]).map(d=>d.nome).filter(n=>n!=="").map(n=>`<option value="${esc(n)}/">`).join('');
+    $('discsMover').innerHTML = dirs;
+    $('dlgMover').showModal();
+};
+
+function renderItem(i) {
+    const isSite = i.tipo === 'Site';
+    const caminhoOpcoes = isSite ? i.caminho.substring(0, i.caminho.lastIndexOf('/')) : i.caminho;
+    animDelay++;
+    
+    return `<a class="item t-${esc(i.tipo)}" href="${esc(url(i.caminho))}" draggable="true" style="animation-delay:${animDelay * 0.03}s" ${isSite?' target="_blank"':`data-arquivo="${esc(i.caminho)}"`}>
+        <div style="display:flex; justify-content:space-between; align-items:flex-start">
+            <b>${esc(i.titulo)}</b>
+            <span role="button" class="btn-opcoes" data-caminho="${esc(caminhoOpcoes)}" data-tipo="${esc(i.tipo)}" title="Options">⋮</span>
+        </div>
+        <span>${esc(i.tipo)} · ${esc(i.data)}</span>
+    </a>`;
+}
+
+function desenhar(){
+  const q = norm(busca.value.trim());
+  animDelay = 0;
+  
+  if (q) {
+      const ds = (B.disciplinas||[]).map(d => ({
+          nome: d.nome,
+          itens: (d.itens||[]).filter(i => norm(i.título+' '+d.nome+' '+i.tipo).includes(q))
+      })).filter(d => d.itens.length);
+      
+      if (!ds.length) {
+          lista.innerHTML = '<div class="vazio"><p>Nada encontrado para essa busca.</p></div>';
+          return;
+      }
+      lista.innerHTML = ds.map(d => `
+          <section class="disc">
+              <h2>${d.nome === '' ? 'Raiz' : esc(d.nome)} <small>${d.itens.length}</small></h2>
+              <div class="grade">
+                  ${d.itens.map(renderItem).join('')}
+              </div>
+          </section>
+      `).join('');
+      
+  } else {
+      const d = (B.disciplinas||[]).find(x => x.nome === pastaAtual) || {itens: []};
+      const arquivos = d.itens;
+      
+      const subpastas = (B.disciplinas||[]).filter(x => {
+          if (x.nome === pastaAtual || x.nome === "") return false;
+          if (pastaAtual === "") {
+              return !x.nome.includes("/");
+          } else {
+              return x.nome.startsWith(pastaAtual + "/") && x.nome.lastIndexOf("/") === pastaAtual.length;
+          }
+      });
+
+      let migalhasHtml = `<div class="migalhas"><a href="#" onclick="abrirPasta('');return false"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg> Biblioteca</a>`;
+      if (pastaAtual) {
+          const partes = pastaAtual.split("/");
+          let pathAcumulado = "";
+          for (let i = 0; i < partes.length; i++) {
+              pathAcumulado += (i===0?"":"/") + partes[i];
+              migalhasHtml += ` <span class="sep">›</span> `;
+              if (i === partes.length - 1) {
+                  migalhasHtml += `<span>${esc(partes[i])}</span>`;
+              } else {
+                  migalhasHtml += `<a href="#" onclick="abrirPasta('${esc(pathAcumulado)}');return false">${esc(partes[i])}</a>`;
+              }
+          }
+      }
+      migalhasHtml += `</div>`;
+
+      if (arquivos.length === 0 && subpastas.length === 0 && pastaAtual === "") {
+          lista.innerHTML = migalhasHtml + '<div class="vazio"><h2>Sua biblioteca ainda está vazia</h2><p>Clique em <b>Adicionar estudo</b> para enviar arquivos, ou <b>Nova Pasta</b> para organizar.</p></div>';
+          return;
+      }
+
+      let html = migalhasHtml + `<div class="grade">`;
+      
+      subpastas.forEach(sp => {
+          animDelay++;
+          const nomePasta = sp.nome.split("/").pop();
+          html += `<a class="item t-Pasta" href="#" data-pasta="${esc(sp.nome)}" draggable="true" style="animation-delay:${animDelay * 0.03}s">
+              <div style="display:flex; justify-content:space-between; align-items:flex-start">
+                  <b><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"></path></svg> ${esc(nomePasta)}</b>
+                  <span role="button" class="btn-opcoes" data-caminho="${esc(sp.nome)}" data-tipo="pasta" title="Options">⋮</span>
+              </div>
+              <span>Pasta</span>
+          </a>`;
+      });
+
+      arquivos.forEach(i => { html += renderItem(i); });
+
+      if (arquivos.length === 0 && subpastas.length === 0) {
+          html += `<span class="olho" style="padding: 10px 0; width:100%">Esta pasta está vazia</span>`;
+      }
+
+      html += `</div>`;
+      lista.innerHTML = html;
+  }
+}
+
+async function carregar(){
+  try {
+      $('lista').innerHTML = '<div class="carregando">Carregando biblioteca...</div>';
+      const r=await fetch('/__dados.json');
+      if(r.status===401) { $('btnSair').click(); return; }
+      B=await r.json()
+  } catch(e){
+      $('lista').innerHTML = '<div class="vazio"><p class="erro">Erro ao carregar dados. Tente recarregar a página.</p></div>';
+      return
+  }
+  $('caixaBusca').hidden=!(B.disciplinas||[]).length;desenhar();
+}
+
+// Busca com debounce
+busca.addEventListener('input', () => {
+    clearTimeout(buscaTimeout);
+    buscaTimeout = setTimeout(desenhar, 300);
+});
+
+// Fechar Menu Flutuante ao clicar fora
+document.addEventListener('click', e => {
+    if(!e.target.closest('.btn-opcoes') && !e.target.closest('#menuFlutuante')) {
+        menuFlutuante.style.display = 'none';
+    }
+});
+
+// Captura cliques no Menu ⋮, pastas e arquivos
+lista.addEventListener('click', e => {
+    const btn = e.target.closest('.btn-opcoes');
+    if (btn) {
+        e.preventDefault();
+        e.stopPropagation();
+        itemMenu = { caminho: btn.dataset.caminho, tipo: btn.dataset.tipo, el: btn.closest('.item') };
+        
+        $('bMenuAbrir').textContent = itemMenu.tipo === 'pasta' ? 'Abrir Pasta' : 'Abrir Estudo';
+        
+        menuFlutuante.style.display = 'flex';
+        const rect = btn.getBoundingClientRect();
+        let top = rect.bottom + 8;
+        if(top + menuFlutuante.offsetHeight > window.innerHeight) {
+            top = rect.top - menuFlutuante.offsetHeight - 8;
+        }
+        menuFlutuante.style.top = top + 'px';
+        menuFlutuante.style.left = (rect.right - menuFlutuante.offsetWidth) + 'px';
+        return;
+    }
+    
+    const pasta = e.target.closest('[data-pasta]');
+    if (pasta) {
+        e.preventDefault();
+        abrirPasta(pasta.dataset.pasta);
+        return;
+    }
+
+    const a = e.target.closest('[data-arquivo]');
+    if (a) {
+        e.preventDefault();
+        post('/__abrir',{c:a.dataset.arquivo});
+    }
+});
+
+const aviso=(t,erro)=>{const a=$('aviso');a.hidden=!t;a.textContent=t||'';a.classList.toggle('erro',!!erro)};
+
+// Ações do Menu de Contexto
+$('bMenuAbrir').onclick = () => {
+    menuFlutuante.style.display = 'none';
+    if (itemMenu.tipo === 'pasta') abrirPasta(itemMenu.caminho);
+    else if (itemMenu.tipo === 'Site') window.open(url(itemMenu.caminho + '/index.html'), '_blank');
+    else post('/__abrir', { c: itemMenu.caminho });
+};
+
+$('bMenuMover').onclick = () => {
+    menuFlutuante.style.display = 'none';
+    prepararMover(itemMenu.caminho, itemMenu.tipo);
+};
+
+$('bMenuExcluir').onclick = async () => {
+    menuFlutuante.style.display = 'none';
+    const nome = itemMenu.caminho.split('/').pop();
+    if (confirm(`Tem certeza que deseja apagar "${nome}" para sempre?\n\nEsta ação não pode ser desfeita.`)) {
+        // UI Otimista - Some instantaneamente da tela
+        itemMenu.el.style.display = 'none';
+        try {
+            const r = await post('/__excluir', { c: itemMenu.caminho });
+            if (!r.ok) throw new Error(await r.text());
+            
+            if (pastaAtual === itemMenu.caminho || pastaAtual.startsWith(itemMenu.caminho + '/')) {
+                pastaAtual = ""; sessionStorage.removeItem('pastaAtual');
+            }
+            await carregar(); // Recarrega os dados reais em segundo plano
+        } catch(err) {
+            itemMenu.el.style.display = ''; // Reverte se der erro
+            aviso('Erro: ' + err.message, true);
+        }
+    }
+};
+
+// -----------------------------------------------------
+// LÓGICA DE DRAG & DROP (Arrastar e Largar)
+// -----------------------------------------------------
+let itemArrastado = null;
+
+lista.addEventListener('dragstart', e => {
+    const item = e.target.closest('.item');
+    if (item) {
+        itemArrastado = {
+            caminho: item.dataset.arquivo || item.dataset.pasta,
+            tipo: item.dataset.pasta ? 'pasta' : 'arquivo',
+            el: item
+        };
+        setTimeout(() => item.classList.add('arrastando'), 0);
+    }
+});
+
+lista.addEventListener('dragend', e => {
+    if (itemArrastado) itemArrastado.el.classList.remove('arrastando');
+    document.querySelectorAll('.alvo-drag').forEach(el => el.classList.remove('alvo-drag'));
+    itemArrastado = null;
+});
+
+lista.addEventListener('dragover', e => {
+    e.preventDefault();
+    const alvo = e.target.closest('[data-pasta]');
+    if (alvo && itemArrastado && alvo !== itemArrastado.el) {
+        if (itemArrastado.tipo === 'pasta' && alvo.dataset.pasta.startsWith(itemArrastado.caminho)) return;
+        alvo.classList.add('alvo-drag');
+    }
+});
+
+lista.addEventListener('dragleave', e => {
+    const alvo = e.target.closest('.alvo-drag');
+    if (alvo) alvo.classList.remove('alvo-drag');
+});
+
+lista.addEventListener('drop', async e => {
+    e.preventDefault();
+    const alvo = e.target.closest('[data-pasta]');
+    if (!alvo || !itemArrastado || alvo === itemArrastado.el) return;
+    if (itemArrastado.tipo === 'pasta' && alvo.dataset.pasta.startsWith(itemArrastado.caminho)) return;
+
+    const destinoCaminho = alvo.dataset.pasta + '/' + itemArrastado.caminho.split('/').pop();
+    
+    // UI Otimista - Some e limpa realces
+    itemArrastado.el.style.display = 'none';
+    alvo.classList.remove('alvo-drag');
+    
+    try {
+        const r = await post('/__mover', { origem: itemArrastado.caminho, destino: destinoCaminho });
+        if(!r.ok) throw new Error(await r.text());
+        await carregar(); 
+    } catch(err) {
+        itemArrastado.el.style.display = '';
+        aviso('Erro ao mover: ' + err.message, true);
+    }
+});
+
+$('pasta').addEventListener('click',async()=>{
+    try{
+        const r=await post('/__pasta');
+        if(!r.ok) throw new Error(await r.text());
+        aviso('Pasta raiz aberta.');
+    }catch(e){aviso('Erro ao abrir pasta: '+e.message,true)}
+});
+
+let fila=[];
+$('add').addEventListener('click',async()=>{
+  aviso('');
+  try{
+      const r=await post('/__escolher');
+      if(!r.ok) throw new Error(await r.text());
+      fila=await r.json()
+  }catch(e){
+      aviso('Não consegui abrir a janela: '+e.message,true);
+      return;
+  }
+  if(!fila.length) return;
+  $('dNome').textContent=fila.length===1?fila[0].nome:fila.length+' arquivos selecionados';
+  $('disc').value = pastaAtual;
+  const dirs = (B.disciplinas||[]).map(d=>d.nome).filter(n=>n!=="").map(n=>`<option value="${esc(n)}">`).join('');
+  $('discs').innerHTML = dirs;
+  $('dlg').showModal();
+});
+$('dCan').addEventListener('click',()=>$('dlg').close());
+$('fDlg').addEventListener('submit',async()=>{
+    const disciplina=$('disc').value;
+    let ok=0,ult='';
+    for(const f of fila){
+        aviso('Adicionando '+f.nome+'...');
+        try{
+            let r=await post('/__adicionar',{id:f.id,disciplina});
+            if(r.status===409){
+                const m=await r.text();
+                if(confirm(m+' Substituir?'))
+                    r=await post('/__adicionar',{id:f.id,disciplina,substituir:true});
+                else continue
+            }
+            const t=await r.text();
+            if(!r.ok){
+                aviso(f.nome+': '+t,true);
+                await carregar();
+                return
+            }
+            ok++;
+            ult=t
+        }catch(e){
+            aviso('Não consegui adicionar '+f.fname+': '+e.message,true);
+            return
+        }
+    }
+    await carregar();
+    aviso(ok===1?'"'+ult+'" adicionado.':ok?ok+' estudos adicionados.':'');
+});
+
+$('btnNovaPasta').addEventListener('click', () => {
+    $('nPasta').value = pastaAtual ? pastaAtual + '/' : '';
+    const dirs = (B.disciplinas||[]).map(d=>d.nome).filter(n=>n!=="").map(n=>`<option value="${esc(n)}/">`).join('');
+    $('discsPasta').innerHTML = dirs;
+    $('dlgPasta').showModal();
+});
+$('dCanPasta').addEventListener('click',()=>$('dlgPasta').close());
+$('fDlgPasta').addEventListener('submit', async (e) => {
+    const caminho = $('nPasta').value;
+    aviso('Criando pasta...');
+    try {
+        const r = await post('/__criar_pasta', { caminho });
+        if(!r.ok) throw new Error(await r.text());
+        await carregar();
+        abrirPasta(caminho.replace(/\/+$/, ""));
+        aviso('Pasta criada com sucesso.');
+    } catch(err) {
+        aviso('Erro: ' + err.message, true);
+    }
+});
+
+$('dCanMover').addEventListener('click',()=>$('dlgMover').close());
+$('fDlgMover').addEventListener('submit', async (e) => {
+    const origem = $('mOrigem').value;
+    const pasta = $('mPasta').value.replace(/\/+$/, '');
+    const nome = $('mNome').value + $('mExtensao').value;
+    const destino = pasta ? pasta + '/' + nome : nome;
+    
+    aviso('Salvando alterações...');
+    try {
+        const r = await post('/__mover', { origem, destino });
+        if(!r.ok) throw new Error(await r.text());
+        
+        if (pastaAtual === origem || pastaAtual.startsWith(origem + '/')) {
+            pastaAtual = "";
+            sessionStorage.removeItem('pastaAtual');
+        }
+        await carregar();
+        aviso('Item alterado com sucesso.');
+    } catch(err) {
+        aviso('Erro: ' + err.message, true);
+    }
+});
+
+if (sessionStorage.getItem('usrLogado')) { 
+    tLogin.hidden = true; 
+    tApp.hidden = false; 
+    carregar(); 
+} else { 
+    tLogin.hidden = false; 
+    tApp.hidden = true; 
+}
+
+addEventListener('focus', () => { 
+    if(sessionStorage.getItem('usrLogado')) carregar(); 
+});
+
+setInterval(()=>fetch('/__vivo').catch(()=>{}),15000);
+
+// Solicitar permissão para notificações do navegador
+if ('Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission();
+}
+
+function notificar(mensagem, tipo = 'info') {
+    if ('Notification' in window && Notification.permission === 'granted') {
+        new Notification('Biblioteca de Estudos', { body: mensagem });
+    }
+}
+</script>
+</body>
+</html>
+'''
+
+LOGO_PNG = """
+iVBORw0KGgoAAAANSUhEUgAABEwAAAF3CAQAAAAVjRb4AABr3ElEQVR42u2dd5xdZZ3/389ZlsmUTHoP6YGEBAgYCL13FbAXdO0N
+C6ir69qwy7qW3XV/dteuiKAoICCo9A4JhPSQhPQ+mT73PL8/zpk7d8o9z7n3njuZGT7vee2qyeTec57yfb7Pt4IQQgghhBBCCCGE
+EEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGE
+EEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGE
+EEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGE
+EEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGE
+EEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGE
+EEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGE
+EEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGE
+EEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGE
+EEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGE
+EEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGEEEIIIYQQQgghhBBCCCGE
+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
+0MhOtjPZ9wB3xAAAAAElFTkSuQmCC
+"""
+
+raiz = ""
+host = ""
+ultimo_ping = time.time()
+escolhidos = {}
+trava_escolha = threading.Lock()
+SESSOES_ATIVAS = set()
+fila_gui = queue.Queue()
+fila_gui_resp = queue.Queue()
+GERENCIADOR = None  # instanciado uma única vez em main(), reaproveitado em todo request
+
+class GerenciadorArquivos:
+    def __init__(self, raiz):
+        self.raiz = raiz
+        self.cache = {"data": None, "mtime": -1} # Inicializado em -1 para forçar leitura mesmo com pastas vazias
+
+    def listar(self):
+        max_mtime, estrutura = self._varrer()
+        if self.cache["mtime"] < max_mtime or self.cache["data"] is None:
+            self.cache["data"] = estrutura
+            self.cache["mtime"] = max_mtime
+        return self.cache["data"]
+
+    def _varrer(self):
+        """Faz uma única passada pela árvore de diretórios, calculando o mtime
+        máximo e já montando a estrutura ao mesmo tempo (evita dois os.walk)."""
+        g = {}
+        max_mtime = 0
+        for root, dirs, files in os.walk(self.raiz):
+            dirs[:] = [d for d in dirs if not ignorar(d)]
+
+            site = novo_site(root) if root != self.raiz else None
+            if site:
+                rel_root = relativo(root)
+                pai = os.path.dirname(rel_root)
+                g.setdefault(pai, []).append(site[1])
+                try:
+                    max_mtime = max(max_mtime, os.path.getmtime(os.path.join(root, "index.html")))
+                except OSError:
+                    pass
+                dirs[:] = []
+                continue
+
+            rel_root = os.path.relpath(root, self.raiz).replace(os.sep, "/")
+            if rel_root == ".":
+                rel_root = ""
+
+            for f in files:
+                if ignorar(f):
+                    continue
+                c = os.path.join(root, f)
+                try:
+                    max_mtime = max(max_mtime, os.path.getmtime(c))
+                except OSError:
+                    pass
+                it = novo_arquivo(c)
+                if it:
+                    g.setdefault(rel_root, []).append(it)
+
+            if rel_root != "":
+                g.setdefault(rel_root, [])
+
+        g.setdefault("", [])
+        estrutura = [dict(nome=n, itens=sorted(g[n], key=lambda i: i["titulo"].lower())) for n in sorted(g.keys(), key=str.lower)]
+        return max_mtime, estrutura
+
+class GerenciadorSeguranca:
+    @staticmethod
+    def salvar_usr(nome, senha):
+        usrs = GerenciadorSeguranca.obter_usuarios()
+        if nome in usrs: return False
+
+        if USAR_BCRYPT:
+            salt = bcrypt.gensalt()
+            hashed = bcrypt.hashpw(senha.encode(), salt)
+            usrs[nome] = f"{salt.decode()}:{hashed.decode()}"
+        else:
+            salt = os.urandom(16)
+            h = hashlib.sha256(salt + senha.encode("utf-8")).hexdigest()
+            usrs[nome] = f"{salt.hex()}:{h}"
+
+        with open(os.path.join(raiz, "_usuarios.json"), "w", encoding="utf-8") as f:
+            json.dump(usrs, f, ensure_ascii=False)
+        return True
+
+    @staticmethod
+    def obter_usuarios():
+        arq = os.path.join(raiz, "_usuarios.json")
+        if not os.path.isfile(arq): return {}
+        with open(arq, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    @staticmethod
+    def validar_login(nome, senha):
+        usrs = GerenciadorSeguranca.obter_usuarios()
+        armazenado = usrs.get(nome)
+
+        if not armazenado:
+            return False
+
+        try:
+            if USAR_BCRYPT:
+                salt_hex, h_armazenado = armazenado.split(":", 1)
+                salt = salt_hex.encode()
+                hashed = bcrypt.hashpw(senha.encode(), salt)
+                return hashed.decode() == h_armazenado
+            else:
+                salt_hex, h_armazenado = armazenado.split(":", 1)
+                salt = bytes.fromhex(salt_hex)
+                h = hashlib.sha256(salt + senha.encode("utf-8")).hexdigest()
+                return h == h_armazenado
+        except (ValueError, AttributeError):
+            return False
+
+class ErroUso(Exception):
+    def __init__(self, msg, st=400):
+        super().__init__(msg)
+        self.st = st
+
+def obter_usuarios():
+    return GerenciadorSeguranca.obter_usuarios()
+
+def salvar_usr(nome, senha):
+    return GerenciadorSeguranca.salvar_usr(nome, senha)
+
+def validar_login(nome, senha):
+    return GerenciadorSeguranca.validar_login(nome, senha)
+
+def relativo(c):
+    return os.path.relpath(c, raiz).replace(os.sep, "/")
+
+def ignorar(nome):
+    return nome.startswith(("_", "."))
+
+def data_de(c):
+    return datetime.fromtimestamp(os.path.getmtime(c)).strftime("%d/%m/%Y")
+
+def novo_site(pasta):
+    indice = os.path.join(pasta, "index.html")
+    if not os.path.isfile(indice):
+        return None
+    with open(indice, "rb") as f:
+        dados = f.read()
+    titulo = os.path.basename(pasta)
+    m = RE_TITULO.search(dados)
+    if m:
+        t = html.unescape(m.group(1).decode("utf-8", "replace")).strip()
+        titulo = t or titulo
+    d = RE_OLHO.search(dados.decode("utf-8", "replace"))
+    disc = html.unescape(d.group(1)).strip() if d else ""
+    return disc, dict(tipo="Site", titulo=titulo, caminho=relativo(indice), data=data_de(indice))
+
+def novo_arquivo(c):
+    nome, ext = os.path.splitext(os.path.basename(c))
+    t = TIPOS.get(ext.lower())
+    return dict(tipo=t, titulo=nome, caminho=relativo(c), data=data_de(c)) if t else None
+
+def dentro_da_raiz(rel):
+    c = os.path.normpath(os.path.join(raiz, rel.lstrip("/\\").replace("/", os.sep)))
+    try:
+        return c if os.path.commonpath([raiz, c]) == raiz else ""
+    except ValueError:
+        return ""
+
+def limpar(t):
+    t = " ".join(RE_PROIBIDO.sub(" ", t or "").split())
+    t = t.rstrip(". ").lstrip("._ ")
+    return t[:80].strip()
+
+def limpar_caminho(t):
+    t = str(t or "")
+    partes = []
+    for p in t.replace("\\", "/").split("/"):
+        l = limpar(p)
+        if l: partes.append(l)
+    return "/".join(partes)
+
+def escolher_arquivos():
+    import tkinter
+    from tkinter import filedialog
+    r = tkinter.Tk()
+    r.withdraw()
+    r.attributes("-topmost", True)
+    r.update()
+    try:
+        return list(filedialog.askopenfilenames(parent=r, title="Escolha o estudo para adicionar", filetypes=[("Estudos", "*.zip *.pdf *.pptx *.docx *.xlsx *.apkg"), ("Todos os arquivos", "*.*")]))
+    finally:
+        r.destroy()
+
+def adicionar(origem, disc, substituir):
+    nome_arq = os.path.basename(origem)
+    base, ext = os.path.splitext(nome_arq)
+    ext = ext.lower()
+    disc = limpar_caminho(disc)
+
+    if ext != ".zip" and ext not in TIPOS:
+        raise ErroUso("Esse tipo de arquivo não é aceito. Use ZIP, PDF, PPTX, DOCX, XLSX ou APKG.", 415)
+
+    if ext != ".zip":
+        base = limpar(base) or "Arquivo"
+        destino = os.path.join(raiz, disc, base + ext)
+        if os.path.exists(destino) and not substituir:
+            raise ErroUso(f'"{base}" já existe neste local.', 409)
+        os.makedirs(os.path.dirname(destino), exist_ok=True)
+        shutil.copy2(origem, destino)
+        return base
+
+    try:
+        z = zipfile.ZipFile(origem)
+    except (zipfile.BadZipFile, OSError):
+        raise ErroUso("Não foi possível ler esse zip.")
+    tmp = os.path.join(raiz, "_temp", uuid.uuid4().hex)
+    try:
+        with z:
+            nomes = [i.filename.replace("\\", "/") for i in z.infolist()]
+            indices = [n for n in nomes if n.rsplit("/", 1)[-1].lower() == "index.html" and not n.startswith("__MACOSX/")]
+            if not indices:
+                raise ErroUso("Esse zip não tem um site dentro: falta o arquivo index.html.", 422)
+            prefixo = min(indices, key=lambda n: n.count("/"))[: -len("index.html")]
+            for i in z.infolist():
+                n = i.filename.replace("\\", "/")
+                if not n.startswith(prefixo) or n.endswith("/") or stat.S_ISLNK(i.external_attr >> 16):
+                    continue
+                partes = n[len(prefixo):].split("/")
+                if ".." in partes or ":" in n or n.startswith("/"):
+                    raise ErroUso("Esse zip tem caminhos inválidos e foi recusado.", 422)
+                destino = os.path.join(tmp, *partes)
+                os.makedirs(os.path.dirname(destino), exist_ok=True)
+                with z.open(i) as e, open(destino, "wb") as s:
+                    shutil.copyfileobj(e, s)
+        site = novo_site(tmp)
+        if not site:
+            raise ErroUso("Esse zip não tem um site válido.", 422)
+        titulo = site[1]["titulo"]
+        disc_zip = disc or limpar_caminho(site[0])
+        pasta = limpar(titulo) or limpar(base) or "Estudo"
+        destino = os.path.join(raiz, disc_zip, pasta)
+
+        if os.path.exists(destino):
+            if not substituir:
+                raise ErroUso(f'"{titulo}" já existe neste local.', 409)
+            shutil.rmtree(destino)
+        os.makedirs(os.path.dirname(destino), exist_ok=True)
+        os.replace(tmp, destino)
+        return titulo
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+        try:
+            os.rmdir(os.path.join(raiz, "_temp"))
+        except OSError:
+            pass
+
+def abrir_padrao(c):
+    if sys.platform == "win32":
+        os.startfile(c)
+    elif sys.platform == "darwin":
+        subprocess.call(["open", c])
+    else:
+        subprocess.call(["xdg-open", c])
+
+def abrir_janela(url):
+    bases = [os.environ.get(k, "") for k in ("ProgramFiles(x86)", "ProgramFiles", "LOCALAPPDATA")]
+    candidatos = [os.path.join(b, *p) for b in bases if b for p in (("Microsoft", "Edge", "Application", "msedge.exe"), ("Google", "Chrome", "Application", "chrome.exe"))]
+    for n in candidatos:
+        if os.path.isfile(n):
+            perfil = os.path.join(os.environ.get("LOCALAPPDATA", raiz), "BibliotecaDeEstudos", "perfil")
+            os.makedirs(perfil, exist_ok=True)
+            subprocess.Popen([n, "--app=" + url, "--user-data-dir=" + perfil, "--no-first-run", "--no-default-browser-check", "--disable-background-timer-throttling", "--window-size=1280,860"])
+            return
+    webbrowser.open(url)
+
+class Servidor(BaseHTTPRequestHandler):
+    protocol_version = "HTTP/1.1"
+
+    def log_message(self, *a):
+        pass
+
+    def responder(self, st, corpo=b"", tipo="text/plain; charset=utf-8", extra=None):
+        if isinstance(corpo, str):
+            corpo = corpo.encode("utf-8")
+        self.send_response(st)
+        self.send_header("Content-Type", tipo)
+        self.send_header("Content-Length", str(len(corpo)))
+        for k, v in (extra or {}).items():
+            self.send_header(k, v)
+        self.end_headers()
+        self.wfile.write(corpo)
+
+    def autenticado(self):
+        cookie_header = self.headers.get("Cookie", "")
+        cookies = {}
+        if cookie_header:
+            for item in cookie_header.split(";"):
+                item = item.strip()
+                if "=" in item:
+                    key, value = item.split("=", 1)
+                    cookies[key.strip()] = value.strip()
+        token = cookies.get("sessao")
+        return token and token in SESSOES_ATIVAS
+
+    def permitido(self):
+        o = self.headers.get("Origin")
+        return self.headers.get("Host") == host and o == "http://" + host
+
+    def corpo_json(self):
+        return json.loads(self.corpo or b"{}")
+
+    def do_GET(self):
+        global ultimo_ping
+        if self.headers.get("Host") != host:
+            return self.responder(403, "recusado")
+
+        cam = urllib.parse.unquote(urllib.parse.urlsplit(self.path).path)
+
+        PUBLICOS = ("/", "/__vivo", "/__versao", "/__logo.png")
+        if cam not in PUBLICOS and not self.autenticado():
+            return self.responder(401, "Não autenticado")
+
+        if cam == "/__vivo":
+            ultimo_ping = time.time()
+            return self.responder(200, raiz)
+        if cam == "/__versao":
+            return self.responder(200, VERSAO)
+        if cam == "/__dados.json":
+            # Reaproveita a mesma instância (com cache) em vez de criar uma nova a cada request
+            return self.responder(200, json.dumps(dict(disciplinas=GERENCIADOR.listar()), ensure_ascii=False), "application/json; charset=utf-8", {"Cache-Control": "no-store"})
+        if cam == "/__logo.png":
+            return self.responder(200, base64.b64decode(LOGO_PNG), "image/png", {"Cache-Control": "no-store, no-cache, must-revalidate"})
+        if cam == "/":
+            return self.responder(200, PAGINA, MIME[".html"], {"Cache-Control": "no-cache"})
+
+        c = dentro_da_raiz(cam)
+
+        if not c or ignorar(os.path.basename(c)):
+            return self.responder(404, "não encontrado")
+
+        if os.path.isdir(c):
+            if not cam.endswith("/"):
+                return self.responder(302, "", extra={"Location": urllib.parse.quote(cam + "/")})
+            c = os.path.join(c, "index.html")
+
+        if not os.path.isfile(c):
+            return self.responder(404, "não encontrado")
+
+        with open(c, "rb") as f:
+            dados = f.read()
+
+        if c.lower().endswith(".html"):
+            i = dados.lower().rfind(b"</body>")
+            dados = dados[:i] + INJETADO + dados[i:] if i >= 0 else dados + INJETADO
+            return self.responder(200, dados, MIME[".html"], {"Cache-Control": "no-cache"})
+
+        return self.responder(200, dados, MIME.get(os.path.splitext(c)[1].lower(), "application/octet-stream"))
+
+    def do_POST(self):
+        self.corpo = self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        cam = urllib.parse.urlsplit(self.path).path
+
+        if cam == "/__sair":
+            # Antes só verificava o Host; agora exige também Origin válido (mesma
+            # checagem usada nos demais endpoints), evitando que qualquer página
+            # aberta no navegador consiga derrubar o servidor via POST simples.
+            if not self.permitido():
+                return self.responder(403, "recusado")
+            self.responder(200)
+            fila_gui.put("SAIR")
+            return
+
+        if not self.permitido():
+            return self.responder(403, "recusado")
+
+        try:
+            if cam == "/__registrar":
+                d = self.corpo_json()
+                nome = (d.get("nome") or "").strip()
+                senha = d.get("senha") or ""
+                if not nome:
+                    return self.responder(400, "Informe um nome de usuário.")
+                if len(senha) < 6:
+                    return self.responder(400, "Senha deve ter pelo menos 6 caracteres.")
+                if salvar_usr(nome, senha):
+                    return self.responder(200, "ok")
+                return self.responder(409, "Esse nome de usuário já está em uso.")
+
+            if cam == "/__login":
+                d = self.corpo_json()
+                if validar_login(d.get("nome"), d.get("senha")):
+                    token = uuid.uuid4().hex
+                    SESSOES_ATIVAS.add(token)
+                    return self.responder(200, "ok", extra={"Set-Cookie": f"sessao={token}; Path=/; HttpOnly; SameSite=Lax"})
+                return self.responder(401, "Nome ou senha incorretos.")
+
+            if cam == "/__logout":
+                return self.responder(200, "ok", extra={"Set-Cookie": "sessao=; Path=/; Expires=Thu, 01 Jan 1970 00:00:00 GMT"})
+
+            if not self.autenticado():
+                return self.responder(401, "Não autenticado")
+
+            if cam == "/__pasta":
+                abrir_padrao(raiz)
+                return self.responder(200)
+
+            if cam == "/__criar_pasta":
+                d = self.corpo_json()
+                caminho = limpar_caminho(d.get("caminho", ""))
+                if not caminho:
+                    return self.responder(400, "Nome da pasta inválido.")
+                destino = os.path.join(raiz, caminho)
+                os.makedirs(destino, exist_ok=True)
+                return self.responder(200, "ok")
+
+            if cam == "/__excluir":
+                c = dentro_da_raiz(self.corpo_json().get("c", ""))
+                if not c or c == raiz:
+                    return self.responder(403, "Ação não permitida.")
+                try:
+                    if os.path.isdir(c):
+                        shutil.rmtree(c)
+                    else:
+                        os.remove(c)
+
+                    pasta_pai = os.path.dirname(c)
+                    while pasta_pai != raiz and os.path.isdir(pasta_pai) and not os.listdir(pasta_pai):
+                        os.rmdir(pasta_pai)
+                        pasta_pai = os.path.dirname(pasta_pai)
+
+                    return self.responder(200, "ok")
+                except Exception as ex:
+                    logger.error(f"Erro ao excluir: {ex}")
+                    return self.responder(500, f"Erro ao excluir: {str(ex)}")
+
+            if cam == "/__mover":
+                d = self.corpo_json()
+                origem_rel = d.get("origem", "")
+                destino_rel = d.get("destino", "")
+
+                origem = dentro_da_raiz(origem_rel)
+                if not origem or not os.path.exists(origem):
+                    return self.responder(404, "Item de origem não encontrado.")
+
+                destino_limpo = limpar_caminho(destino_rel)
+                if not destino_limpo:
+                    return self.responder(400, "Nome de destino inválido.")
+
+                destino = os.path.join(raiz, destino_limpo)
+
+                try:
+                    if os.path.commonpath([raiz, os.path.abspath(destino)]) != raiz:
+                        return self.responder(403, "Destino fora da biblioteca.")
+                except ValueError:
+                    return self.responder(403, "Destino inválido.")
+
+                if os.path.exists(destino):
+                    return self.responder(409, "Já existe um item com esse nome no destino.")
+
+                try:
+                    os.makedirs(os.path.dirname(destino), exist_ok=True)
+                    shutil.move(origem, destino)
+
+                    pasta_pai = os.path.dirname(origem)
+                    while pasta_pai != raiz and os.path.isdir(pasta_pai) and not os.listdir(pasta_pai):
+                        os.rmdir(pasta_pai)
+                        pasta_pai = os.path.dirname(pasta_pai)
+                except Exception as ex:
+                    logger.error(f"Erro ao mover: {ex}")
+                    return self.responder(500, f"Erro ao mover: {str(ex)}")
+
+                return self.responder(200, "ok")
+
+            if cam == "/__abrir":
+                c = dentro_da_raiz(self.corpo_json().get("c", ""))
+                if not c or os.path.splitext(c)[1].lower() not in TIPOS or not os.path.isfile(c):
+                    return self.responder(403, "recusado")
+                abrir_padrao(c)
+                return self.responder(200)
+
+            if cam == "/__escolher":
+                if not trava_escolha.acquire(blocking=False):
+                    return self.responder(409, "A janela de escolha já está aberta.")
+                try:
+                    fila_gui.put("ESCOLHER")
+                    caminhos = fila_gui_resp.get()
+                    if isinstance(caminhos, Exception):
+                        raise caminhos
+                finally:
+                    trava_escolha.release()
+                saida = []
+                for p in caminhos:
+                    k = uuid.uuid4().hex
+                    escolhidos[k] = p
+                    saida.append(dict(id=k, nome=os.path.basename(p)))
+                return self.responder(200, json.dumps(saida, ensure_ascii=False), "application/json; charset=utf-8")
+
+            if cam == "/__adicionar":
+                d = self.corpo_json()
+                origem = escolhidos.get(d.get("id"))
+                if not origem:
+                    return self.responder(403, "recusado")
+                try:
+                    t = adicionar(origem, d.get("disciplina", ""), bool(d.get("substituir")))
+                    escolhidos.pop(d.get("id"), None)  # evita acumular entradas indefinidamente
+                    return self.responder(200, t)
+                except ErroUso as e:
+                    return self.responder(e.st, str(e))
+
+        except Exception as e:
+            logger.error(f"Erro na requisição POST {cam}: {e}")
+            return self.responder(500, str(e))
+        self.responder(404, "não encontrado")
+
+def consulting(url):
+    with urllib.request.build_opener(urllib.request.ProxyHandler({})).open(url, timeout=1) as r:
+        return r.read().decode("utf-8", "replace")
+
+def vigiar():
+    while True:
+        time.sleep(10)
+        if time.time() - ESPERA > ultimo_ping:
+            logger.info("Tempo de inatividade excedido. Encerrando...")
+            fila_gui.put("SAIR")
+
+def main(pasta=None):
+    global raiz, host, ultimo_ping, GERENCIADOR
+    raiz = os.path.realpath(pasta or os.path.dirname(os.path.abspath(sys.argv[0])))
+
+    # --- CÓDIGO DE MIGRAÇÃO DE USUÁRIOS ANTIGOS ---
+    arq_antigo = os.path.join(raiz, "_uszarios.json")
+    arq_novo = os.path.join(raiz, "_usuarios.json")
+
+    # Se o arquivo antigo existir e o novo ainda não, o sistema renomeia o arquivo
+    if os.path.exists(arq_antigo) and not os.path.exists(arq_novo):
+        try:
+            os.rename(arq_antigo, arq_novo)
+            logger.info("Ficheiro de utilizadores atualizado para _usuarios.json")
+        except Exception as e:
+            logger.error(f"Erro ao migrar ficheiro de utilizadores: {e}")
+    # ----------------------------------------------
+
+    # Instância única do gerenciador de arquivos, reaproveitada em todas as
+    # requisições (o cache interno só funciona se a instância persistir).
+    GERENCIADOR = GerenciadorArquivos(raiz)
+
+    srv = None
+    for p in range(PORTA, PORTA + 20):
+        host = f"127.0.0.1:{p}"
+        try:
+            if consulting(f"http://{host}/__vivo") == raiz:
+                if consulting(f"http://{host}/__versao") == VERSAO:
+                    logger.info("Já existe uma instância rodando. Abrindo a interface...")
+                    abrir_janela(f"http://{host}/")
+                    return
+                urllib.request.build_opener(urllib.request.ProxyHandler({})).open(urllib.request.Request(f"http://{host}/__sair", method="POST", headers={"Host": host, "Origin": f"http://{host}"}), timeout=1)
+                time.sleep(0.5)
+        except OSError:
+            pass
+        try:
+            srv = ThreadingHTTPServer(("127.0.0.1", p), Servidor)
+            logger.info(f"Servidor iniciado em http://{host}")
+            break
+        except OSError:
+            continue
+    if srv is None:
+        raise RuntimeError("Nenhuma porta livre neste computador.")
+    ultimo_ping = time.time()
+
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    threading.Thread(target=vigiar, daemon=True).start()
+    threading.Timer(0.2, abrir_janela, [f"http://{host}/"]).start()
+
+    while True:
+        tarefa = fila_gui.get()
+        if tarefa == "SAIR":
+            logger.info("Encerrando aplicação...")
+            srv.shutdown()
+            os._exit(0)
+        elif tarefa == "ESCOLHER":
+            try:
+                fila_gui_resp.put(escolher_arquivos())
+            except Exception as e:
+                logger.error(f"Erro ao escolher arquivos: {e}")
+                fila_gui_resp.put(e)
+
+if __name__ == "__main__":
+    try:
+        main()
+    except Exception as e:
+        logger.critical(f"Erro fatal: {e}")
+        import ctypes
+        if sys.platform == "win32":
+            ctypes.windll.user32.MessageBoxW(0, traceback.format_exc()[-900:], "Biblioteca de Estudos", 0x10)
+        else:
+            print(f"Erro Fatal: {traceback.format_exc()}", file=sys.stderr)

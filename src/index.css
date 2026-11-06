@@ -1,0 +1,149 @@
+@import "tailwindcss";
+@custom-variant dark (&:where(.dark, .dark *));
+
+@layer base {
+  :root {
+    /* Brand Book da Apostila v3.1 - Cores Oficiais */
+    
+    /* Estrutura e Neutros */
+    --tinta: #1D1D1F;      /* Texto corrido e títulos */
+    --suave: #5B5F66;      /* Legendas, notas de margem, número de página */
+    --fio: #D9DCE1;        /* Linhas finas, bordas de tabela, pautas */
+    --fundo: #FDFDFC;      /* Fundo da página */
+    
+    /* Padrão dos Atlas (Tipos de Destaque) */
+    --veia: #2B4F7E;       /* Conceito-chave, faixa do capítulo, numeração, links de figura */
+    --arteria: #A8322D;    /* Correlação clínica */
+    --nervo: #9A7609;      /* Ponto de prova */
+    --linfa: #3D7A5A;      /* Síntese e todas as ferramentas de revisão */
+    --prova: #5B4B8A;      /* Caiu em prova, Teste você, gabaritos */
+    --professora: #C2410C;  /* Destaque da professora */
+    
+    /* Fundos das Caixas (sem contorno grosso) */
+    --bg-conceito: #EEF3F9;
+    --bg-clinica: #FBEFEE;
+    --bg-prova: #FBF4DC;
+    --bg-sintese: #EDF6F0;
+    --bg-teste: #F3EFFA;
+    --bg-teste-header: #ECE7F6;
+    --bg-professora: #FFF3EB;
+    --bg-livro: #F6F2EA;
+    --text-livro: #6B5A3E;
+    --bg-atencao: #F4F5F7;
+    --text-atencao: #4A4E55;
+    
+    /* Tipografia */
+    --org: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    --ler: "Source Serif 4", Georgia, serif;
+    --mono: "JetBrains Mono", monospace;
+  }
+
+  .dark {
+    /* Modo Escuro com compensação óptica para as cores do Brand Book */
+    --tinta: #F5F5F7;
+    --suave: #9E9EA4;
+    --fio: #3A3A3D;
+    --fundo: #161618;
+
+    --veia: #4A7AB5;
+    --arteria: #D2534D;
+    --nervo: #C8A02A;
+    --linfa: #52A078;
+    --prova: #7D6DB5;
+    --professora: #EA642C;
+
+    --bg-conceito: #192330;
+    --bg-clinica: #2D1A19;
+    --bg-prova: #2D2615;
+    --bg-sintese: #15261D;
+    --bg-teste: #221D2C;
+    --bg-teste-header: #2B2438;
+    --bg-professora: #2C1E14;
+    --bg-livro: #26231C;
+    --text-livro: #D2BEA0;
+    --bg-atencao: #202124;
+    --text-atencao: #B3B7BD;
+  }
+
+  body {
+    background-color: var(--fundo);
+    color: var(--tinta);
+    font-family: var(--ler);
+    -webkit-font-smoothing: antialiased;
+    margin: 0;
+    padding: 0;
+    min-height: 100vh;
+  }
+}
+
+.font-org {
+  font-family: var(--org);
+}
+
+.font-ler {
+  font-family: var(--ler);
+}
+
+.font-code {
+  font-family: var(--mono);
+}
+
+/* Regra do Brand Book: cantos discretos de 3mm a 4mm (~6px a 8px) */
+.canto-marca {
+  border-radius: 6px;
+}
+.canto-faixa {
+  border-radius: 8px;
+}
+
+/* Animações suaves de entrada */
+@keyframes entraCard {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.animate-entra {
+  animation: entraCard 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+/* Regras tipográficas fixas do Brand book:
+   - Parágrafos justificados sem hifenização
+   - Rótulos e notas de margem alinhados à esquerda
+*/
+.texto-apostila {
+  font-family: var(--ler);
+  font-size: 14.5px;
+  line-height: 1.58;
+  text-align: justify;
+  hyphens: none;
+}
+
+.nota-margem {
+  font-family: var(--org);
+  font-size: 11.5px;
+  line-height: 1.4;
+  color: var(--suave);
+  text-align: left;
+}
+
+/* Custom scrollbars limpas */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--fio);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--suave);
+}

@@ -1,0 +1,6 @@
+{
+  "name": "Biblioteca de Estudos (Estuda Jaider)",
+  "description": "Plataforma de estudos médicos com organização por disciplinas e pastas, leitor integrado de PDFs, slides, flashcards Anki e sites interativos.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
